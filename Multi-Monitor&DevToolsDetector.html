@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-screen and DevTools Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .detected {
+            background-color: #ffcccc;
+            border: 1px solid #ff8888;
+        }
+        .not-detected {
+            background-color: #ccffcc;
+            border: 1px solid #88ff88;
+        }
+        .info {
+            background-color: #f0f0f0;
+            border: 1px solid #cccccc;
+            padding: 10px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+    </style>
+</head>
+<body>
+    <h1>Multi-screen and DevTools Detection</h1>
+    
+    <div class="info">
+        <p>This page demonstrates detection of multiple monitors and developer tools usage.</p>
+        <p>Note: These detection methods are not 100% reliable and can be circumvented by determined users.</p>
+    </div>
+    
+    <h2>Multiple Monitor Detection</h2>
+    <div id="multiMonitorStatus" class="status not-detected">
+        Checking for multiple monitors...
+    </div>
+    <div id="screenDetails"></div>
+    <button id="checkScreensBtn">Check Using Screen API</button>
+    
+    <h2>Developer Tools Detection</h2>
+    <div id="devToolsStatus" class="status not-detected">
+        Checking for developer tools...
+    </div>
+    
+    <script>
+        // Multi-monitor detection
+        function detectMultipleMonitors() {
+            if (window.screen && window.screen.availWidth && window.screen.width) {
+                // Check if screen.availWidth is significantly different from window.screen.width
+                const screenDifference = Math.abs(window.screen.availWidth - window.screen.width);
+                
+                // Another approach: try to detect unusually wide screen ratios
+                const screenRatio = window.screen.availWidth / window.screen.availHeight;
+                const isWideRatio = screenRatio > 2.5; // Most single monitors have ratios < 2.5
+                
+                // Use screen.left to detect if window is on secondary monitor
+                const isOffsetScreen = typeof window.screenLeft !== 'undefined' && window.screenLeft !== 0;
+                
+                // Try to access multiple screen information if available
+                let hasMultipleScreens = false;
+                if (window.screen.isExtended !== undefined) {
+                    hasMultipleScreens = window.screen.isExtended;
+                }
+                
+                // Display screen information
+                const screenInfoDiv = document.getElementById('screenDetails');
+                screenInfoDiv.innerHTML = `
+                    <p>Screen width: ${window.screen.width}px</p>
+                    <p>Screen available width: ${window.screen.availWidth}px</p>
+                    <p>Screen height: ${window.screen.height}px</p>
+                    <p>Screen available height: ${window.screen.availHeight}px</p>
+                    <p>Screen ratio: ${screenRatio.toFixed(2)}</p>
+                    <p>Screen left position: ${window.screenLeft}px</p>
+                `;
+                
+                // Combine detection methods
+                const result = isWideRatio || isOffsetScreen || screenDifference > 100 || hasMultipleScreens;
+                
+                // Update UI
+                const statusDiv = document.getElementById('multiMonitorStatus');
+                if (result) {
+                    statusDiv.className = 'status detected';
+                    statusDiv.innerHTML = 'Multiple monitors detected!';
+                } else {
+                    statusDiv.className = 'status not-detected';
+                    statusDiv.innerHTML = 'No multiple monitors detected.';
+                }
+                
+                return result;
+            }
+            
+            return false;
+        }
+        
+        // Check for multiple monitors on page load
+        window.addEventListener('load', detectMultipleMonitors);
+        
+        // Screen API button handler
+        document.getElementById('checkScreensBtn').addEventListener('click', async () => {
+            try {
+                if (window.getScreenDetails) {
+                    const screenDetails = await window.getScreenDetails();
+                    const screens = screenDetails.screens;
+                    const statusDiv = document.getElementById('multiMonitorStatus');
+                    
+                    if (screens.length > 1) {
+                        statusDiv.className = 'status detected';
+                        statusDiv.innerHTML = `Multiple monitors detected: ${screens.length} screens found!`;
+                    } else {
+                        statusDiv.className = 'status not-detected';
+                        statusDiv.innerHTML = 'Single monitor detected via Screen API.';
+                    }
+                } else {
+                    alert('Screen API not supported in this browser.');
+                }
+            } catch (error) {
+                console.log("Screen API error:", error);
+                alert('Unable to access Screen API. User may have denied permission.');
+            }
+        });
+        
+        // DevTools detection methods
+        function detectDevTools() {
+            const devToolsStatus = document.getElementById('devToolsStatus');
+            
+            // Method 1: Check for specific objects that may be present when DevTools is open
+            if (window.Firebug && window.Firebug.chrome && window.Firebug.chrome.isInitialized) {
+                devToolsStatus.className = 'status detected';
+                devToolsStatus.innerHTML = 'Developer Tools detected (Firebug)';
+                preventFurtherUse();
+                return true;
+            }
+            
+            // Method 2: Check for resize of dev tools window
+            let devToolsOpened = false;
+            const windowWidth = window.outerWidth - window.innerWidth > 160;
+            const windowHeight = window.outerHeight - window.innerHeight > 160;
+            
+            if (windowWidth || windowHeight) {
+                devToolsStatus.className = 'status detected';
+                devToolsStatus.innerHTML = 'Developer Tools detected (Window size differential)';
+                preventFurtherUse();
+                return true;
+            }
+            
+            // Method 3: Debug via console.log
+            const consoleCheck = function() {
+                devToolsOpened = true;
+                devToolsStatus.className = 'status detected';
+                devToolsStatus.innerHTML = 'Developer Tools detected (Console debugging)';
+                preventFurtherUse();
+            };
+            
+            // Method 4: Performance analysis
+            const before = performance.now();
+            debugger;
+            const after = performance.now();
+            const gap = after - before;
+            
+            if (gap > 200) {
+                devToolsStatus.className = 'status detected';
+                devToolsStatus.innerHTML = 'Developer Tools detected (Debugger statement)';
+                preventFurtherUse();
+                return true;
+            }
+            
+            // Console open detection
+            const div = document.createElement('div');
+            let isConsoleOpen = false;
+            Object.defineProperty(div, 'id', {
+                get: function() {
+                    isConsoleOpen = true;
+                    return 'devToolsCheck';
+                }
+            });
+            console.log('%c', div);
+            
+            if (isConsoleOpen) {
+                devToolsStatus.className = 'status detected';
+                devToolsStatus.innerHTML = 'Developer Tools detected (Console open)';
+                preventFurtherUse();
+                return true;
+            }
+            
+            // If we get here, no DevTools detected
+            devToolsStatus.className = 'status not-detected';
+            devToolsStatus.innerHTML = 'No Developer Tools detected.';
+            return false;
+        }
+        
+        // Function to prevent further use if DevTools is detected
+        function preventFurtherUse() {
+            // You can implement actions here such as:
+            // - Redirect to a warning page
+            // - Disable functionality
+            // - Log the attempt
+            
+            // Example: Add a message about prevention
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'info';
+            warningDiv.innerHTML = '<strong>Warning:</strong> Developer tools detected. In a real application, access could be restricted.';
+            document.body.appendChild(warningDiv);
+            
+            // Example: You could redirect the user
+            // window.location.href = 'warning.html';
+        }
+        
+        // Check for DevTools on page load
+        window.addEventListener('load', detectDevTools);
+        
+        // Continuous monitoring for DevTools
+        setInterval(detectDevTools, 1000);
+        
+        // Listen for keyboard shortcuts commonly used to open DevTools
+        document.addEventListener('keydown', function(e) {
+            // Check for F12 key or Ctrl+Shift+I or Cmd+Option+I (Mac)
+            if (e.key === 'F12' || 
+                (e.ctrlKey && e.shiftKey && e.key === 'I') ||
+                (e.metaKey && e.altKey && e.key === 'I')) {
+                
+                e.preventDefault();
+                alert('Developer tools shortcut detected and blocked.');
+                
+                const devToolsStatus = document.getElementById('devToolsStatus');
+                devToolsStatus.className = 'status detected';
+                devToolsStatus.innerHTML = 'Developer Tools shortcut detected';
+                preventFurtherUse();
+            }
+        });
+        
+        // Prevent right-click context menu (commonly used for inspection)
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            return false;
+        });
+    </script>
+</body>
+</html>
