@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proctoring Screen Sharing Detector</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #212529;
+            margin-bottom: 30px;
+        }
+        
+        .container {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 25px;
+        }
+        
+        #status-container {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #e9ecef;
+            font-weight: bold;
+            font-size: 18px;
+            transition: background-color 0.3s ease;
+        }
+        
+        .status-secure {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .status-warning {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .detection-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .metric-card {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .metric-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #495057;
+        }
+        
+        #detection-log {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ced4da;
+            padding: 10px;
+            font-family: monospace;
+            background-color: #212529;
+            color: #f8f9fa;
+            border-radius: 4px;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        
+        .log-entry {
+            margin-bottom: 2px;
+            border-bottom: 1px solid #343a40;
+            padding-bottom: 2px;
+        }
+        
+        .log-time {
+            color: #6c757d;
+        }
+        
+        .log-message {
+            color: #e9ecef;
+        }
+        
+        .log-alert {
+            color: #f8d7da;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Assessment Proctoring System</h1>
+    
+    <div class="container">
+        <div id="status-container" class="status-secure">
+            Secure Assessment Environment
+        </div>
+        
+        <div class="detection-metrics">
+            <div class="metric-card">
+                <div class="metric-title">Window Dimensions</div>
+                <div id="window-size">Loading...</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-title">Screen Sharing Status</div>
+                <div id="sharing-status">Not detected</div>
+            </div>
+        </div>
+        
+        <div id="detection-log"></div>
+    </div>
+    
+    <script>
+        // DOM elements
+        const statusContainer = document.getElementById('status-container');
+        const windowSizeElement = document.getElementById('window-size');
+        const sharingStatusElement = document.getElementById('sharing-status');
+        const logElement = document.getElementById('detection-log');
+        
+        // Configuration
+        const config = {
+            // Percentage threshold for dimension changes
+            dimensionChangeThreshold: 4,
+            
+            // Default window dimensions will be set on load
+            defaultWidth: null,
+            defaultHeight: null,
+            
+            // Height difference threshold (in pixels)
+            heightDifferenceThreshold: 45,
+            
+            // Minimum time between height changes to trigger alert (in ms)
+            heightChangeTimeout: 2000,
+            
+            // Periodic check interval (in ms)
+            checkInterval: 1000,
+            
+            // Security settings
+            lockOnDetection: true,
+            notifyOnDetection: true,
+            
+            // Reset detection after this period of normal behavior (in ms)
+            resetPeriod: 5000
+        };
+        
+        // State tracking
+        let state = {
+            isScreenShared: false,
+            lastHeight: window.innerHeight,
+            lastWidth: window.innerWidth,
+            heightChangeTimestamp: 0,
+            suspiciousEvents: 0,
+            stableWindowSince: Date.now(),
+            sharingDetectedAt: null,
+            activeTracks: []
+        };
+        
+        // Log function
+        function log(message, isAlert = false) {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            timeSpan.textContent = `[${timestamp}] `;
+            
+            const messageSpan = document.createElement('span');
+            messageSpan.className = isAlert ? 'log-alert' : 'log-message';
+            messageSpan.textContent = message;
+            
+            entry.appendChild(timeSpan);
+            entry.appendChild(messageSpan);
+            
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            console.log(`[${timestamp}] ${message}`);
+        }
+        
+        // Update UI status
+        function updateStatus(isSharing, message) {
+            if (isSharing) {
+                statusContainer.className = 'status-danger';
+                statusContainer.textContent = 'SCREEN SHARING DETECTED - VIOLATION';
+                sharingStatusElement.textContent = 'DETECTED';
+                sharingStatusElement.style.color = '#721c24';
+                sharingStatusElement.style.fontWeight = 'bold';
+                
+                if (config.notifyOnDetection) {
+                    log('⚠️ SCREEN SHARING DETECTED - VIOLATION RECORDED', true);
+                }
+                
+                if (config.lockOnDetection) {
+                    // Implement your locking mechanism here
+                    // This could notify the server, lock the test, etc.
+                }
+                
+                state.isScreenShared = true;
+                state.sharingDetectedAt = Date.now();
+            } else if (message) {
+                statusContainer.className = 'status-warning';
+                statusContainer.textContent = message;
+                sharingStatusElement.textContent = 'Suspicious activity';
+                sharingStatusElement.style.color = '#856404';
+                
+                state.isScreenShared = false;
+            } else {
+                statusContainer.className = 'status-secure';
+                statusContainer.textContent = 'Secure Assessment Environment';
+                sharingStatusElement.textContent = 'Not detected';
+                sharingStatusElement.style.color = '';
+                sharingStatusElement.style.fontWeight = '';
+                
+                state.isScreenShared = false;
+            }
+        }
+        
+        // NEW: Function to check if screen sharing has ended
+        function checkSharingEnded() {
+            const now = Date.now();
+            
+            // Check if dimensions have been stable for the reset period
+            if (state.isScreenShared && 
+                now - state.stableWindowSince > config.resetPeriod &&
+                state.activeTracks.length === 0) {
+                
+                log('Screen dimensions stable - screen sharing may have ended');
+                
+                // Only revert if all sharing indicators are gone
+                if (state.suspiciousEvents <= 1) {
+                    log('Screen sharing ended - returning to secure state');
+                    updateStatus(false);
+                    state.sharingDetectedAt = null;
+                }
+            }
+        }
+        
+        // 1. Specific window size detection based on the observed pattern
+        function checkWindowSize() {
+            const currentWidth = window.innerWidth;
+            const currentHeight = window.innerHeight;
+            
+            // Update window size display
+            windowSizeElement.textContent = `${currentWidth} × ${currentHeight}`;
+            
+            // Calculate percentage changes
+            const widthChange = Math.abs((currentWidth - config.defaultWidth) / config.defaultWidth * 100);
+            const heightChange = Math.abs((currentHeight - config.defaultHeight) / config.defaultHeight * 100);
+            
+            // Check for significant dimension changes
+            if (widthChange >= config.dimensionChangeThreshold || 
+                heightChange >= config.dimensionChangeThreshold) {
+                
+                const now = Date.now();
+                
+                // If dimensions changed rapidly, that's suspicious
+                if ((currentHeight !== state.lastHeight || currentWidth !== state.lastWidth) && 
+                    now - state.heightChangeTimestamp < config.heightChangeTimeout) {
+                    state.suspiciousEvents++;
+                    state.stableWindowSince = now;
+                    
+                    if (state.suspiciousEvents >= 2) {
+                        updateStatus(true);
+                        log(`Screen sharing detected - Rapid dimension change: ${state.lastWidth}×${state.lastHeight} → ${currentWidth}×${currentHeight}`, true);
+                    } else {
+                        updateStatus(false, 'Suspicious window size change detected');
+                        log(`Suspicious dimension change: ${state.lastWidth}×${state.lastHeight} → ${currentWidth}×${currentHeight}`);
+                    }
+                    
+                    state.heightChangeTimestamp = now;
+                }
+                
+                // General dimension reduction detection
+                if (heightChange >= config.dimensionChangeThreshold) {
+                    updateStatus(false, 'Window dimensions changed (possible screen sharing)');
+                    log(`Window dimensions changed by ${widthChange.toFixed(1)}% × ${heightChange.toFixed(1)}%`);
+                    
+                    state.suspiciousEvents++;
+                    state.stableWindowSince = now;
+                    
+                    if (state.suspiciousEvents >= 3) {
+                        updateStatus(true);
+                        log('Screen sharing detected - Persistent dimension changes', true);
+                    }
+                }
+            } else {
+                // Reset suspicious events counter gradually when dimensions are normal
+                const now = Date.now();
+                if (state.suspiciousEvents > 0 && 
+                    now - state.stableWindowSince > 3000) {
+                    
+                    state.suspiciousEvents = Math.max(0, state.suspiciousEvents - 0.5);
+                    
+                    // If we've had stable window size for a while, check if sharing ended
+                    checkSharingEnded();
+                }
+                
+                // Update stable window timestamp if dimensions haven't changed
+                if (currentHeight === state.lastHeight && 
+                    currentWidth === state.lastWidth && 
+                    state.lastHeight === config.defaultHeight && 
+                    state.lastWidth === config.defaultWidth) {
+                    
+                    if (state.stableWindowSince === 0) {
+                        state.stableWindowSince = now;
+                    }
+                }
+            }
+            
+            // Update last known dimensions
+            if (currentHeight !== state.lastHeight || currentWidth !== state.lastWidth) {
+                state.heightChangeTimestamp = Date.now();
+                state.lastHeight = currentHeight;
+                state.lastWidth = currentWidth;
+                state.stableWindowSince = 0;
+            }
+        }
+
+        function initializeDefaultDimensions() {
+            config.defaultWidth = window.innerWidth;
+            config.defaultHeight = window.innerHeight;
+            
+            log(`Initial dimensions set to: ${config.defaultWidth}×${config.defaultHeight}`);
+        }
+        
+        // 2. Screen Capture API detection
+        function setupScreenCaptureDetection() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                const originalGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
+                
+                navigator.mediaDevices.getDisplayMedia = function(constraints) {
+                    log('Screen Capture API called - direct screen sharing detected', true);
+                    updateStatus(true);
+                    
+                    return originalGetDisplayMedia.call(navigator.mediaDevices, constraints)
+                        .then(stream => {
+                            log('Screen sharing stream active', true);
+                            
+                            // Track active tracks
+                            const tracks = stream.getTracks();
+                            state.activeTracks = [...state.activeTracks, ...tracks];
+                            
+                            tracks.forEach(track => {
+                                track.addEventListener('ended', () => {
+                                    log('Screen sharing stream ended');
+                                    
+                                    // Remove from active tracks
+                                    state.activeTracks = state.activeTracks.filter(t => t.id !== track.id);
+                                    
+                                    // Reset if no tracks are active
+                                    if (state.activeTracks.length === 0) {
+                                        state.stableWindowSince = Date.now();
+                                        state.suspiciousEvents = Math.max(0, state.suspiciousEvents - 1);
+                                        
+                                        // Wait a bit to ensure window dimensions return to normal
+                                        setTimeout(checkSharingEnded, 1000);
+                                    }
+                                });
+                            });
+                            
+                            return stream;
+                        });
+                };
+                
+                log('Screen Capture API detection enabled');
+            }
+        }
+        
+        // 3. Permission monitoring
+        function setupPermissionDetection() {
+            if (navigator.permissions) {
+                function checkPermission() {
+                    navigator.permissions.query({ name: 'display-capture' })
+                        .then(status => {
+                            if (status.state === 'granted') {
+                                if (!state.isScreenShared) {
+                                    log('Screen capture permission granted - possible sharing', true);
+                                    updateStatus(true);
+                                }
+                            } else if (status.state === 'prompt' || status.state === 'denied') {
+                                // If permission is no longer granted, this may indicate sharing has stopped
+                                if (state.isScreenShared && state.activeTracks.length === 0) {
+                                    log('Screen capture permission no longer granted');
+                                    state.suspiciousEvents = Math.max(0, state.suspiciousEvents - 1);
+                                    checkSharingEnded();
+                                }
+                            }
+                            
+                            // Add change listener
+                            status.addEventListener('change', () => {
+                                log(`Screen capture permission changed to: ${status.state}`);
+                                checkPermission();
+                            });
+                        })
+                        .catch(() => {
+                            // Some browsers may not support this
+                        });
+                }
+                
+                // Check initially and periodically
+                checkPermission();
+                setInterval(checkPermission, 5000);
+            }
+        }
+        
+        // Initialize all detection methods
+        function initializeDetection() {
+            log('Initializing proctoring screen sharing detection...');
+            
+            // Initialize default dimensions
+            initializeDefaultDimensions();
+            
+            // Setup window size check
+            checkWindowSize();
+            setInterval(checkWindowSize, config.checkInterval);
+            
+            // Setup periodic check for sharing ended
+            setInterval(checkSharingEnded, config.checkInterval * 2);
+            
+            // Setup resize event listener
+            window.addEventListener('resize', checkWindowSize);
+            
+            // Setup Screen Capture API detection
+            setupScreenCaptureDetection();
+            
+            // Setup permission monitoring
+            setupPermissionDetection();
+            
+            // Add visibility change monitoring
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    log('Page hidden - possible screen sharing setup');
+                } else {
+                    log('Page visible again');
+                    setTimeout(() => {
+                        checkWindowSize();
+                        // Extra check after coming back visible
+                        setTimeout(checkSharingEnded, 1000); 
+                    }, 500);
+                }
+            });
+            
+            log('Proctoring screen sharing detection initialized');
+            log(`Initial window dimensions: ${config.defaultWidth}×${config.defaultHeight}`);
+            log(`Configured to detect dimension changes greater than ${config.dimensionChangeThreshold}%`);
+            log(`Will reset detection after ${config.resetPeriod/2000} seconds of normal behavior`);
+            
+            // Initial metrics update
+            windowSizeElement.textContent = `${window.innerWidth} × ${window.innerHeight}`;
+        }
+        
+        // Start detection when page loads
+        window.addEventListener('load', initializeDetection);
+    </script>
+</body>
+</html>

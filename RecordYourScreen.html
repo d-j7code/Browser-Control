@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automatic Screen Recorder</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        
+        .info-box {
+            background-color: #e8f4fd;
+            border-left: 4px solid #2196F3;
+            padding: 10px 15px;
+            margin: 15px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            justify-content: center;
+        }
+        
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        #startRecording {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        #startRecording:hover {
+            background-color: #45a049;
+        }
+        
+        #startRecording:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #stopRecording {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        #stopRecording:hover {
+            background-color: #d32f2f;
+        }
+        
+        #stopRecording:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #recordingStatus {
+            margin: 15px 0;
+            padding: 12px;
+            background-color: #f1f1f1;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .video-container {
+            margin: 20px 0;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        video {
+            width: 100%;
+            display: none;
+            background-color: #000;
+        }
+        
+        #downloadLink {
+            display: none;
+            margin: 15px 0;
+            padding: 12px 20px;
+            background-color: #2196F3;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        #downloadLink:hover {
+            background-color: #0b7dda;
+        }
+        
+        .shortcuts {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Automatic Screen Recorder</h1>
+        
+        <div class="info-box">
+            This tool will automatically record your entire screen when you press the Start Recording button. Recordings will be saved to the "test_video" folder when possible.
+        </div>
+        
+        <div class="button-group">
+            <button id="startRecording">Start Recording</button>
+            <button id="stopRecording" disabled>Stop Recording</button>
+        </div>
+        
+        <div id="recordingStatus">Ready to record. Click the Start Recording button.</div>
+        
+        <div class="video-container">
+            <video id="recordedVideo" controls playsinline autoplay></video>
+        </div>
+        
+        <a id="downloadLink" href="#" download="screen-recording.webm">Download Recording</a>
+        
+        <div class="shortcuts">
+            Keyboard shortcuts: Alt+R to start recording, Alt+S to stop recording
+        </div>
+    </div>
+
+    <script>
+        // Automatic screen recording functionality
+        const startRecordingButton = document.getElementById('startRecording');
+        const stopRecordingButton = document.getElementById('stopRecording');
+        const videoElement = document.getElementById('recordedVideo');
+        const downloadLink = document.getElementById('downloadLink');
+        const recordingStatus = document.getElementById('recordingStatus');
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let stream;
+        let recordingCounter = 1;
+
+        // Start recording function - automatically selects entire screen
+        async function startRecording() {
+            recordedChunks = [];
+            recordingStatus.textContent = 'Starting automatic screen recording...';
+            
+            try {
+                // Request screen capture with specific constraints to get full window
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        displaySurface: 'monitor', 
+                        cursor: 'always',
+                        width: { ideal: window.screen.width },
+                        height: { ideal: window.screen.height },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: {
+                        // Enable system audio capture if supported
+                        suppressLocalAudioPlayback: true
+                    },
+                    preferCurrentTab: false, 
+                    selfBrowserSurface: "include" // Include this browser window
+                });
+                
+                // Try to select monitor automatically by analyzing track settings
+                const videoTrack = stream.getVideoTracks()[0];
+                const trackSettings = videoTrack.getSettings();
+                
+                // Create a media recorder instance with high quality
+                const options = { 
+                    mimeType: 'video/webm; codecs=vp9',
+                    videoBitsPerSecond: 3000000 // 3 Mbps for good quality
+                };
+                
+                mediaRecorder = new MediaRecorder(stream, options);
+                
+                // Event handlers
+                mediaRecorder.ondataavailable = handleDataAvailable;
+                mediaRecorder.onstop = handleStop;
+                
+                // Start recording with larger chunks (1 second intervals)
+                mediaRecorder.start(1000); 
+                recordingStatus.textContent = 'Automatically recording full screen...';
+                
+                // Update UI
+                startRecordingButton.disabled = true;
+                stopRecordingButton.disabled = false;
+                
+                // Listen for the "ended" event on tracks to detect if user ends sharing
+                videoTrack.addEventListener('ended', () => {
+                    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                        stopRecording();
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Error starting screen recording:', error);
+                recordingStatus.textContent = `Recording failed: ${error.message}`;
+                startRecordingButton.disabled = false;
+            }
+        }
+
+        // Stop recording function
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                recordingStatus.textContent = 'Processing recording...';
+                
+                // Stop all tracks in the stream
+                stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        // Handle data available event
+        function handleDataAvailable(event) {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        }
+
+        // Handle stop event with folder organization
+        function handleStop() {
+            // Create a blob from the recorded chunks
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            
+            // Create a URL for the blob
+            const url = URL.createObjectURL(blob);
+            
+            // Set the video source to the recorded blob
+            videoElement.src = url;
+            videoElement.style.display = 'block';
+            
+            // Generate unique filename with folder path
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `test_video/recording_${recordingCounter++}_${timestamp}.webm`;
+            
+            // Create a download link for the recording
+            downloadLink.href = url;
+            downloadLink.download = filename;
+            downloadLink.style.display = 'block';
+            downloadLink.textContent = `Download Recording (${Math.round(blob.size / 1024 / 1024 * 100) / 100} MB)`;
+            
+            // Update UI
+            startRecordingButton.disabled = false;
+            stopRecordingButton.disabled = true;
+            recordingStatus.textContent = 'Recording complete! You can preview or download below.';
+            
+            // Attempt to save directly to the folder (requires additional permissions)
+            saveToFolder(blob, filename);
+        }
+
+        // Function to attempt saving directly to a folder
+        async function saveToFolder(blob, filename) {
+    
+            
+            try {
+                // Method 1: Try using File System Access API (Chrome 86+, Edge 86+)
+                if ('showDirectoryPicker' in window) {
+                    try {
+                        // First time will prompt, subsequent could use stored handle
+                        let directoryHandle;
+                        
+                        // Try to get stored directory handle if available
+                        if (localStorage.getItem('testVideoDirectoryHandle')) {
+                            try {
+                                const storedHandle = JSON.parse(localStorage.getItem('testVideoDirectoryHandle'));
+                                directoryHandle = await window.showDirectoryPicker({
+                                    id: 'testVideos',
+                                    startIn: storedHandle
+                                });
+                            } catch (e) {
+                                // Fall back to regular picker
+                                directoryHandle = await window.showDirectoryPicker();
+                            }
+                        } else {
+                            directoryHandle = await window.showDirectoryPicker();
+                        }
+                        
+                        // Try to create test_video subdirectory if it doesn't exist
+                        let testVideoHandle;
+                        try {
+                            testVideoHandle = await directoryHandle.getDirectoryHandle('test_video', { create: true });
+                        } catch (e) {
+                            // If we can't create subdirectory, use main directory
+                            testVideoHandle = directoryHandle;
+                        }
+                        
+                        // Get just the filename without the path
+                        const justFilename = filename.split('/').pop();
+                        
+                        // Create a file in the directory
+                        const fileHandle = await testVideoHandle.getFileHandle(justFilename, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        
+                        // Store the directory handle for future use
+                        try {
+                            localStorage.setItem('testVideoDirectoryHandle', JSON.stringify(directoryHandle));
+                        } catch (e) {
+                            console.log('Could not save directory handle', e);
+                        }
+                        
+                        recordingStatus.textContent += ' File saved to selected folder!';
+                    } catch (err) {
+                        console.log('File system access denied or not supported', err);
+                        // Fall back to download method
+                    }
+                } else {
+                    console.log('File System Access API not supported in this browser');
+                    // Continue with download approach as fallback
+                }
+            } catch (error) {
+                console.error('Error saving to folder:', error);
+                // The download link still works as fallback
+            }
+        }
+
+        // Event listeners for buttons
+        startRecordingButton.addEventListener('click', startRecording);
+        stopRecordingButton.addEventListener('click', stopRecording);
+
+        // Add keyboard shortcut for convenience
+        document.addEventListener('keydown', (event) => {
+            // Alt+R to start recording, Alt+S to stop
+            if (event.altKey && event.key === 'r' && !startRecordingButton.disabled) {
+                startRecording();
+            } else if (event.altKey && event.key === 's' && !stopRecordingButton.disabled) {
+                stopRecording();
+            }
+        });
+
+        // Auto-start recording when page loads (uncomment to enable)
+        /*
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (!startRecordingButton.disabled) {
+                    startRecording();
+                }
+            }, 1000); // Short delay to ensure page is fully loaded
+        });
+        */
+    </script>
+</body>
+</html>
